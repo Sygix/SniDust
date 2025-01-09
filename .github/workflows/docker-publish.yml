@@ -7,8 +7,6 @@ name: Docker MultiArch Build Prod
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 17 */10 * *'
   push:
     branches: [ main ]
     paths-ignore:
