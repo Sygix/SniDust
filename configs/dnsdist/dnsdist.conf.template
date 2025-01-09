@@ -22,7 +22,7 @@ echo ""
 
 echo ""
 echo "-- Add plain DNS bind"
-echo "addLocal('${DNSDIST_BIND_IP}:5300')"
+echo "addLocal('${DNSDIST_BIND_IP}:53')"
 echo ""
 
 if [ "${DNSDIST_ENABLE_DOT}" == "true" ]; then

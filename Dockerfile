@@ -31,11 +31,11 @@ ENV INSTALL_DEFAULT_DOMAINS=true
 HEALTHCHECK --interval=30s --timeout=3s CMD (pgrep "dnsdist" > /dev/null && pgrep "nginx" > /dev/null) || exit 1
 
 # Expose Ports
-EXPOSE 5300/udp
-EXPOSE 8080/tcp
-EXPOSE 8443/tcp
+EXPOSE 53/udp
+EXPOSE 80/tcp
+EXPOSE 443/tcp
 EXPOSE 8083/tcp
-EXPOSE 8530/tcp
+EXPOSE 853/tcp
 
 RUN echo "I'm building for $TARGETPLATFORM"
 

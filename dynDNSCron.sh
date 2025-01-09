@@ -3,7 +3,7 @@ echo "[INFO] [DynDNSCron] Regenerating ACL.."
 source /generateACL.sh
 echo "[INFO] [DynDNSCron] ACL regenerated!"
 echo "[INFO] [DynDNSCron] Reloading DnsDist ACl config"
-/usr/bin/dog @127.0.0.1:5300 --short reload.acl.snidust.local
+/usr/bin/dog @127.0.0.1:53 --short reload.acl.snidust.local
 retVal=$?
 if [ $retVal -eq 0 ]; then
   echo "[INFO] [DynDNSCron] DnsDist ACL config successfully reloaded!"
