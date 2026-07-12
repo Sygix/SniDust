@@ -10,9 +10,8 @@ function read_acl () {
     if [ $retVal -eq 0 ]; then
       CLIENTS+=( "${i}" )
     else
-      RESOLVE_RESULT=$(/usr/bin/dog --json "${i}" | jq -r '.responses[].answers | map(select(.type == "A")) | first | .address')
-      retVal=$?
-      if [ $retVal -eq 0 ]; then
+      RESOLVE_RESULT=$(/usr/bin/dog --json "${i}" | jq -r '.responses[].answers | map(select(.type == "A")) | first | .address // empty')
+      if [ -n "${RESOLVE_RESULT}" ]; then
         export DYNDNS_CRON_ENABLED=true
         CLIENTS+=( "${RESOLVE_RESULT}" )
       else
