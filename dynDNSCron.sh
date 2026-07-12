@@ -13,5 +13,8 @@ fi
 
 
 echo "[INFO] [DynDNSCron] reloading nginx..."
-/usr/sbin/nginx -s reload
-echo "[INFO] [DynDNSCron] ngix successfully reloaded"
+if nginx -s reload; then
+  echo "[INFO] [DynDNSCron] nginx successfully reloaded"
+else
+  echo "[ERROR] [DynDNSCron] Failed to reload nginx"
+fi
