@@ -68,7 +68,10 @@ echo "[INFO] Starting DNSDist..."
 
 
 echo "[INFO] Starting nginx.."
-nginx
+# Run nginx in the foreground so we can capture its real PID and supervise it.
+# (Without 'daemon off;' nginx forks and returns immediately, so $! would point
+# at the previously backgrounded process instead of nginx.)
+nginx -g 'daemon off;' &
 nginx_processId=$!
 
 sleep 5
