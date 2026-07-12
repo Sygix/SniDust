@@ -33,20 +33,23 @@ then
   fi
 fi
 
-if [ -z "${DNSDIST_WEBSERVER_PASSWORD}" ];
+if [ "${DNSDIST_ENABLE_WEBSERVER}" == "true" ];
 then
-  log_info "Dnsdist webserver password not set - generating one"
-  DNSDIST_WEBSERVER_PASSWORD=$(< /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c12)
-  export DNSDIST_WEBSERVER_PASSWORD
-  log_info "Generated WebServer Password: $DNSDIST_WEBSERVER_PASSWORD"
-fi
+  if [ -z "${DNSDIST_WEBSERVER_PASSWORD}" ];
+  then
+    log_info "Dnsdist webserver password not set - generating one"
+    DNSDIST_WEBSERVER_PASSWORD=$(< /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c12)
+    export DNSDIST_WEBSERVER_PASSWORD
+    log_info "Generated WebServer Password: $DNSDIST_WEBSERVER_PASSWORD"
+  fi
 
-if [ -z "${DNSDIST_WEBSERVER_API_KEY}" ];
-then
-  log_info "Dnsdist webserver api key not set - generating one"
-  DNSDIST_WEBSERVER_API_KEY=$(< /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c32)
-  export DNSDIST_WEBSERVER_API_KEY
-  log_info "Generated WebServer API Key: $DNSDIST_WEBSERVER_API_KEY"
+  if [ -z "${DNSDIST_WEBSERVER_API_KEY}" ];
+  then
+    log_info "Dnsdist webserver api key not set - generating one"
+    DNSDIST_WEBSERVER_API_KEY=$(< /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c32)
+    export DNSDIST_WEBSERVER_API_KEY
+    log_info "Generated WebServer API Key: $DNSDIST_WEBSERVER_API_KEY"
+  fi
 fi
 
 if [ "$INSTALL_DEFAULT_DOMAINS" = true ];
