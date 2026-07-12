@@ -44,7 +44,7 @@ printf '%s\n' "${CLIENTS[@]}" > /etc/dnsdist/allowedClients.acl
 
 if [ -f "/etc/dnsdist/allowedClients.acl" ];
 then
-  echo "" > etc/nginx/allowedClients.conf
+  : > /etc/nginx/allowedClients.conf
   while read -r line
   do
     echo "allow $line;" >> /etc/nginx/allowedClients.conf
