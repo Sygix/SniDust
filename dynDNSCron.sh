@@ -1,20 +1,21 @@
 #!/bin/bash
-echo "[INFO] [DynDNSCron] Regenerating ACL.."
+source /lib/log.sh
+export LOG_CONTEXT="DynDNSCron"
+
+log_step "Regenerating ACL.."
 source /generateACL.sh
-echo "[INFO] [DynDNSCron] ACL regenerated!"
-echo "[INFO] [DynDNSCron] Reloading DnsDist ACl config"
-/usr/bin/dog @127.0.0.1:53 --short reload.acl.snidust.local
-retVal=$?
-if [ $retVal -eq 0 ]; then
-  echo "[INFO] [DynDNSCron] DnsDist ACL config successfully reloaded!"
+log_ok "ACL regenerated!"
+
+log_step "Reloading dnsdist ACL config"
+if /usr/bin/dog @127.0.0.1:53 --short reload.acl.snidust.local; then
+  log_ok "dnsdist ACL config successfully reloaded!"
 else
-  echo "[ERROR] [DynDNSCron] Failed to reload DnsDist ACL config!"
+  log_error "Failed to reload dnsdist ACL config!"
 fi
 
-
-echo "[INFO] [DynDNSCron] reloading nginx..."
+log_step "Reloading nginx..."
 if nginx -s reload; then
-  echo "[INFO] [DynDNSCron] nginx successfully reloaded"
+  log_ok "nginx successfully reloaded"
 else
-  echo "[ERROR] [DynDNSCron] Failed to reload nginx"
+  log_error "Failed to reload nginx"
 fi

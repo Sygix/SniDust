@@ -66,6 +66,7 @@ COPY configs/dnsdist/conf.d/00-SniDust.conf /etc/dnsdist/conf.d/00-SniDust.conf
 COPY configs/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY domains.d /var/lib/snidust/domains.d
 
+COPY lib/log.sh /lib/log.sh
 COPY entrypoint.sh /entrypoint.sh
 COPY generateACL.sh /generateACL.sh
 COPY dynDNSCron.sh /dynDNSCron.sh
