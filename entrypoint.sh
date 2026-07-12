@@ -20,9 +20,15 @@ fi
 
 if [ -z "${EXTERNAL_IP}" ];
 then
-  echo "[INFO] External IP not set - trying to get IP by myself"
-  EXTERNAL_IP=$(curl -f icanhazip.com)
-  export EXTERNAL_IP
+  echo "[INFO] External IP not set - trying to determine it automatically"
+  if EXTERNAL_IP=$(curl -fsS --max-time 10 https://icanhazip.com);
+  then
+    export EXTERNAL_IP
+    echo "[INFO] Detected external IP: ${EXTERNAL_IP}"
+  else
+    echo "[ERROR] Could not determine external IP automatically. Set the EXTERNAL_IP environment variable explicitly."
+    exit 1
+  fi
 fi
 
 if [ -z "${DNSDIST_WEBSERVER_PASSWORD}" ];
