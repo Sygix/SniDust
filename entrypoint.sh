@@ -1,4 +1,5 @@
 #!/bin/bash -e
+set -e
 source /lib/log.sh
 
 # Validate DoT config

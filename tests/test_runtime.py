@@ -17,7 +17,7 @@ def docker(*args):
     return subprocess.check_output(DOCKER + list(args), text=True).strip()
 
 
-def query(port, name, qtype, tcp=False, tls_context=None):
+def query(port, name, qtype, tcp=False, tls_context=None, include_authority=False):
     ident = secrets.randbelow(65536)
     wire_name = b"".join(bytes([len(label)]) + label.encode() for label in name.split(".")) + b"\0"
     packet = struct.pack("!6H", ident, 256, 1, 0, 0, 0) + wire_name + struct.pack("!2H", qtype, 1)
@@ -41,7 +41,7 @@ def query(port, name, qtype, tcp=False, tls_context=None):
         else:
             sock.sendto(packet, ("127.0.0.1", port))
             data, _ = sock.recvfrom(65535)
-    response_id, flags, questions, answers, _, _ = struct.unpack("!6H", data[:12])
+    response_id, flags, questions, answers, authorities, _ = struct.unpack("!6H", data[:12])
     if response_id != ident:
         raise RuntimeError("DNS response ID mismatch")
     def skip_name(pos):
@@ -53,13 +53,20 @@ def query(port, name, qtype, tcp=False, tls_context=None):
     pos = 12
     for _ in range(questions):
         pos = skip_name(pos) + 4
-    records = []
-    for _ in range(answers):
-        pos = skip_name(pos)
-        record_type, _, _, length = struct.unpack("!HHIH", data[pos:pos + 10])
-        pos += 10
-        records.append((record_type, data[pos:pos + length]))
-        pos += length
+    def read_records(count):
+        nonlocal pos
+        records = []
+        for _ in range(count):
+            pos = skip_name(pos)
+            record_type, _, _, length = struct.unpack("!HHIH", data[pos:pos + 10])
+            pos += 10
+            records.append((record_type, data[pos:pos + length]))
+            pos += length
+        return records
+    records = read_records(answers)
+    authority = read_records(authorities)
+    if include_authority:
+        return flags & 15, records, authority
     return flags & 15, records
 
 
@@ -91,7 +98,7 @@ class RuntimeTests(unittest.TestCase):
             args += ["-e", "DNSDIST_ENABLE_DOT=true", "-p", "127.0.0.1::853/tcp"]
         args.append(IMAGE)
         if from_file:
-            args += ["bash", "-c", "printf '0.0.0.0/0\\n' > /etc/snidust/test-clients; exec bash /entrypoint.sh"]
+            args += ["bash", "-c", "if [ ! -f /etc/snidust/test-initialized ]; then printf '0.0.0.0/0\\n' > /etc/snidust/test-clients; touch /etc/snidust/test-initialized; fi; exec bash /entrypoint.sh"]
         docker(*args)
         cls.containers.append(name)
         udp_port = int(docker("port", name, "53/udp").rsplit(":", 1)[1])
@@ -116,10 +123,15 @@ class RuntimeTests(unittest.TestCase):
                                      (0, [(1, socket.inet_aton("192.0.2.10"))]))
 
     def test_no_ipv6_or_service_hint_escape(self):
-        for _, port, _ in (self.all_domains, self.listed_domains):
-            for qtype in (28, 64, 65):
-                with self.subTest(port=port, qtype=qtype):
-                    self.assertEqual(query(port, "www.netflix.com", qtype), (0, []))
+        for _, udp, tcp in (self.all_domains, self.listed_domains):
+            for port, transport in ((udp, False), (tcp, True)):
+                for qtype in (28, 64, 65):
+                    with self.subTest(port=port, tcp=transport, qtype=qtype):
+                        rcode, answers, authority = query(port, "www.netflix.com", qtype, transport, include_authority=True)
+                        self.assertEqual((rcode, answers), (0, []))
+                        self.assertEqual(len(authority), 1)
+                        self.assertEqual(authority[0][0], 6)
+                        self.assertEqual(struct.unpack("!I", authority[0][1][-4:])[0], 60)
 
     def test_all_domains_rewrites_unlisted_names(self):
         self.assertEqual(query(self.all_domains[1], "probe.invalid", 1),
@@ -197,6 +209,18 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(query(port, "reload.acl.snidust.local", 1), (2, []))
         self.assertEqual(query(port, "netflix.com", 1), (0, [(1, socket.inet_aton("192.0.2.10"))]))
         self.assertEqual(docker("exec", name, "cat", "/etc/nginx/allowedClients.conf"), original)
+
+    def test_restart_aborts_when_acl_cannot_be_generated(self):
+        name, _, _ = self.start("true", from_file=True)
+        docker("exec", name, "rm", "/etc/snidust/test-clients")
+        docker("restart", name)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if docker("inspect", "-f", "{{.State.Running}}", name) == "false":
+                self.assertNotEqual(docker("inspect", "-f", "{{.State.ExitCode}}", name), "0")
+                return
+            time.sleep(0.2)
+        self.fail("Restart reused stale ACL files after ACL generation failed")
 
     def test_unauthorized_clients_are_rejected(self):
         name, port, _ = self.start("true", from_file=True)
