@@ -3,6 +3,7 @@ LABEL org.opencontainers.image.authors="seji@tihoda.de"
 ARG TARGETPLATFORM
 
 ENV DNSDIST_BIND_IP=0.0.0.0
+ENV DNSDIST_DEBUG=true
 ENV ALLOWED_CLIENTS=127.0.0.1
 ENV ALLOWED_CLIENTS_FILE=
 ENV EXTERNAL_IP=
@@ -36,6 +37,7 @@ HEALTHCHECK --interval=30s --timeout=3s CMD (pgrep "dnsdist" > /dev/null && pgre
 
 # Expose Ports
 EXPOSE 53/udp
+EXPOSE 53/tcp
 EXPOSE 80/tcp
 EXPOSE 443/tcp
 EXPOSE 8083/tcp

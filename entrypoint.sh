@@ -59,9 +59,7 @@ then
 fi
 
 log_step "Generating ACL..."
-set +e
 source generateACL.sh
-set -e
 
 log_step "Generating DNSDist Config..."
 /bin/bash /etc/dnsdist/dnsdist.conf.template > /etc/dnsdist/dnsdist.conf
@@ -71,21 +69,29 @@ then
   log_info "DynDNS Address in ALLOWED_CLIENTS detected => Enable cron job"
   echo "$DYNDNS_CRON_SCHEDULE /bin/bash /dynDNSCron.sh" > /etc/snidust/dyndns.cron
   supercronic /etc/snidust/dyndns.cron &
+  cron_processId=$!
 fi
 
 log_step "Starting DNSDist..."
 /usr/bin/dnsdist -C /etc/dnsdist/dnsdist.conf --supervised --disable-syslog --uid snidust --gid snidust &
+dnsdist_processId=$!
 
 log_step "Starting nginx.."
-# Run nginx in the foreground so we can capture its real PID and supervise it.
-# (Without 'daemon off;' nginx forks and returns immediately, so $! would point
-# at the previously backgrounded process instead of nginx.)
 nginx -g 'daemon off;' &
 nginx_processId=$!
 
-sleep 5
+stop_children() {
+  trap - TERM INT
+  kill -TERM "$dnsdist_processId" "$nginx_processId" ${cron_processId:+"$cron_processId"} 2>/dev/null || true
+  wait "$dnsdist_processId" "$nginx_processId" ${cron_processId:+"$cron_processId"} 2>/dev/null || true
+}
+trap 'stop_children; exit 0' TERM INT
 
 echo "==================================================================="
-log_ok "SniDust started => Using $EXTERNAL_IP - Point your DNS settings to this address"
+log_info "SniDust processes launched => Using $EXTERNAL_IP - Point your DNS settings to this address"
 echo "==================================================================="
-wait $nginx_processId
+status=0
+wait -n "$dnsdist_processId" "$nginx_processId" ${cron_processId:+"$cron_processId"} || status=$?
+log_error "A supervised process exited (status=$status) - stopping container"
+stop_children
+exit 1

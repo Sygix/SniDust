@@ -28,7 +28,7 @@ echo ""
 
 if [ "${DNSDIST_ENABLE_DOT}" == "true" ]; then
     echo "-- Add DoT bind"
-    echo "addTLSLocal('${DNSDIST_BIND_IP}:8530','/etc/dnsdist/certs/tls.pem','/etc/dnsdist/certs/tls.key')"
+    echo "addTLSLocal('${DNSDIST_BIND_IP}:853','/etc/dnsdist/certs/tls.pem','/etc/dnsdist/certs/tls.key')"
     echo ""
 else
     echo "-- TLS Endpoints disabled"
@@ -70,7 +70,8 @@ fi
 
 if [ "${DNSDIST_DEBUG}" == "true" ]; then
     echo "-- Debug logging rule"
-    echo "addAction(AllRule(), LogAction(\"/tmp/dnsdist.log\", false, true, false))"
+    echo "addAction(AllRule(), LogAction(\"\", false, true, false, false))"
+    echo "addResponseAction(AllRule(), LogResponseAction(\"\", false, true, false, false))"
     echo ""
 fi
 
@@ -87,19 +88,12 @@ echo "addAction(AndRule({QNameRule(\"reload.certs.snidust.local\"),QTypeRule(\"A
 echo ""
 
 if [ "${SPOOF_ALL_DOMAINS}" == "true" ]; then
-    echo " -- rewrite it for ALL Domains"
-    echo "addAction(AllRule(), SpoofAction(\"${EXTERNAL_IP}\"))"
+    echo "addAction(AllRule(), SetTagAction(\"rewrite\",\"true\"))"
 else
-    echo "-- Tag dq if domain is on Blocklist"
     echo "addAction(SuffixMatchNodeRule(BlockNode), SetTagAction(\"rewrite\",\"true\"))"
-    echo ""
-    echo "-- If dq has Tag --> rewrite it"
-    echo "addAction(TagRule(\"rewrite\",\"true\"), SpoofAction(\"${EXTERNAL_IP}\"))"
-    echo ""
-    echo "-- Fallback if dq has tag but QType was not A,AAAA or CNAME"
-    echo "addAction(TagRule(\"rewrite\",\"true\"), RCodeAction(DNSRCode.NXDOMAIN))"
-echo ""
 fi
+echo "addAction(AndRule({TagRule(\"rewrite\",\"true\"), QTypeRule(\"A\")}), SpoofAction(\"${EXTERNAL_IP}\"))"
+echo "addAction(TagRule(\"rewrite\",\"true\"), NegativeAndSOAAction(false, \".\", 60, \"localhost.\", \"hostmaster.localhost.\", 1, 60, 60, 60, 60, {soaInAuthoritySection=true}))"
 
 echo "-- Default -> send to Upstream Pool"
 echo "addAction(AllRule(),PoolAction(\"${DNSDIST_UPSTREAM_POOL_NAME}\"))"
