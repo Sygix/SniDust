@@ -1,4 +1,4 @@
-FROM alpine:3.23
+FROM alpine:3.24
 LABEL org.opencontainers.image.authors="seji@tihoda.de"
 ARG TARGETPLATFORM
 
@@ -26,6 +26,8 @@ ENV DNSDIST_RATE_LIMIT_EVAL_WINDOW=60
 
 ENV DNSDIST_PACKAGE_CACHE_ENABLED=false
 ENV DNSDIST_PACKAGE_CACHE_SIZE=50000
+
+ENV DNSDIST_DEBUG=false
 
 ENV SPOOF_ALL_DOMAINS=false
 ENV DYNDNS_CRON_SCHEDULE="*/15 * * * *"
@@ -80,7 +82,7 @@ RUN chown -R snidust:snidust /etc/dnsdist/ && \
     chown -R snidust:snidust /run/nginx/ && \
     chmod +x /entrypoint.sh && \
     chmod +x /generateACL.sh && \
-    chmod +x dynDNSCron.sh
+    chmod +x /dynDNSCron.sh
 
 USER snidust
 
