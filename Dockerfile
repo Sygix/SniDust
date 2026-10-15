@@ -31,6 +31,7 @@ ENV DNSDIST_DEBUG=false
 
 ENV SPOOF_ALL_DOMAINS=false
 ENV DYNDNS_CRON_SCHEDULE="*/15 * * * *"
+ENV DDNS_CACHE_MAX_AGE=86400
 ENV INSTALL_DEFAULT_DOMAINS=true
 
 # HEALTHCHECKS
@@ -38,6 +39,7 @@ HEALTHCHECK --interval=30s --timeout=3s CMD (pgrep "dnsdist" > /dev/null && pgre
 
 # Expose Ports
 EXPOSE 53/udp
+EXPOSE 53/tcp
 EXPOSE 80/tcp
 EXPOSE 443/tcp
 EXPOSE 8083/tcp

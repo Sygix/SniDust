@@ -2,20 +2,16 @@
 source /lib/log.sh
 export LOG_CONTEXT="DynDNSCron"
 
-log_step "Regenerating ACL.."
-source /generateACL.sh
-log_ok "ACL regenerated!"
-
-log_step "Reloading dnsdist ACL config"
-if /usr/bin/dog @127.0.0.1:53 --short reload.acl.snidust.local; then
-  log_ok "dnsdist ACL config successfully reloaded!"
-else
-  log_error "Failed to reload dnsdist ACL config!"
+log_step "Regenerating ACL..."
+if ! { /bin/bash /generateACL.sh && nginx -t -q && nginx -s reload; }; then
+  log_error "ACL refresh failed - keeping active ACL"
+  exit 1
 fi
 
-log_step "Reloading nginx..."
-if nginx -s reload; then
-  log_ok "nginx successfully reloaded"
+log_step "Applying ACL to dnsdist"
+if /usr/bin/dog @127.0.0.1:53 --short apply.acl.snidust.local; then
+  log_ok "ACL refreshed"
 else
-  log_error "Failed to reload nginx"
+  log_error "Failed to apply ACL to dnsdist"
+  exit 1
 fi
