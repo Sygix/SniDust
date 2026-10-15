@@ -15,6 +15,9 @@ The container listens on these ports:
 | HTTPS proxy | 443 | TCP |
 | DNS over TLS, when enabled | 853 | TCP |
 
+With `DNSDIST_DOT_CERT_TYPE=auto-self`, a new self-signed DoT certificate valid
+for one year is generated at every container start.
+
 With macvlan, forward these router ports directly to the container's LAN IP on
 the same ports. Docker port publishing is unnecessary for that network mode.
 Tests from the router's own LAN through its public IP depend on NAT loopback;
@@ -36,16 +39,27 @@ hostname. A client using another resolver or cached addresses may bypass it.
 
 HTTP and HTTPS access logs go to container stdout, including the client IP,
 hostname or SNI, upstream address, status and duration. Errors go to stderr.
-DNS query and upstream response logging is enabled by default and can be
-disabled with `DNSDIST_DEBUG=false`.
+DNS query and upstream response logging is disabled by default and can be
+enabled with `DNSDIST_DEBUG=true`. It logs every query, so configure log
+rotation on the container runtime before leaving it enabled.
 
-DDNS resolution authorizes all returned A addresses. Refresh failures preserve
-the last known addresses for that name. Without a previous successful lookup,
-an unresolved name makes generation fail while retaining existing ACL files;
-initial startup fails rather than silently omitting that client. Removing a
-DDNS name also removes its cached authorization on the next successful refresh.
-Loopback remains authorized for maintenance queries. An empty client list
-allows only loopback.
+Entries are separated by commas or spaces in `ALLOWED_CLIENTS`, and one per
+line in `ALLOWED_CLIENTS_FILE`, where `#` starts a comment and surrounding
+whitespace and Windows line endings are ignored.
+
+DDNS resolution authorizes all returned A addresses. When a lookup fails, the
+addresses from the last successful lookup of that name are kept for at most
+`DDNS_CACHE_MAX_AGE` seconds (default 86400). A name without recent cached
+addresses is left out and logged as an error, without affecting the other
+clients; the scheduler retries it on its next run. Removing a DDNS name also
+removes its cached authorization. Loopback remains authorized for maintenance
+queries. An empty client list allows only loopback. Configuration errors, such
+as an unreadable client file, keep the existing ACL files, and make startup
+fail.
+
+The scheduler regenerates the ACL, reloads Nginx, then queries
+`apply.acl.snidust.local` so DNSDist only reloads the generated file. Querying
+`reload.acl.snidust.local` performs the full regeneration inside DNSDist.
 
 ACL files are replaced by atomic renames. The per-name cache is stored in
 `/etc/snidust/ddns-cache.json` and lasts for the container lifetime unless that
@@ -65,6 +79,7 @@ on loopback and remove their containers on completion or failure.
 
 The suite checks DNS UDP/TCP in both rewrite modes, IPv6 and service-hint
 suppression, actual Netflix HTTP/TLS connections through the proxy, logs, ACL
-reloads and rejection, DDNS failures and multiple A records, DNS over TLS, and
+reloads and rejection, DDNS failures, cache expiry and multiple A records,
+client file parsing, scheduled refreshes, DNS over TLS across restarts, and
 container shutdown when either primary service exits. Live proxy checks need
 outbound Internet access; they do not verify Netflix playback on a TV.

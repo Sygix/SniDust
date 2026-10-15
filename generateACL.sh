@@ -3,10 +3,15 @@ source /lib/log.sh
 
 generate_acl() {
   local -a client_list=() clients=("127.0.0.1") addresses=()
-  local domain address result cache='{}' next_cache='{}' failed=false
-  local cache_file=/etc/snidust/ddns-cache.json
+  local entry address result entry_cache cache='{}' next_cache='{}'
+  local cache_file=/etc/snidust/ddns-cache.json max_age="${DDNS_CACHE_MAX_AGE:-86400}" now
   local dns_tmp nginx_tmp cache_tmp
   export DYNDNS_CRON_ENABLED=false
+
+  if [[ ! "$max_age" =~ ^[0-9]+$ ]]; then
+    log_error "DDNS_CACHE_MAX_AGE must be a number of seconds - keeping existing ACL"
+    return 1
+  fi
 
   if [ -n "${ALLOWED_CLIENTS_FILE}" ]; then
     if [ ! -r "$ALLOWED_CLIENTS_FILE" ]; then
@@ -21,47 +26,53 @@ generate_acl() {
   if [ -f "$cache_file" ]; then
     cache=$(jq -ce 'select(type == "object")' "$cache_file") || return 1
   fi
+  now=$(date +%s)
 
-  for domain in "${client_list[@]}"; do
-    [ -n "$domain" ] || continue
-    if /bin/ipcalc -cs "$domain"; then
-      log_info "Allowing client '$domain'"
-      clients+=("$domain")
+  for entry in "${client_list[@]}"; do
+    entry="${entry%%#*}"
+    entry="${entry//[$'\t\r ']/}"
+    [ -n "$entry" ] || continue
+    if /bin/ipcalc -cs "$entry"; then
+      log_info "Allowing client '$entry'"
+      clients+=("$entry")
       continue
     fi
 
     export DYNDNS_CRON_ENABLED=true
     addresses=()
-    if result=$(timeout 10 /usr/bin/dog --json "$domain" A); then
+    if result=$(timeout 10 /usr/bin/dog --json "$entry" A); then
       result=$(jq -r '[.responses[]?.answers[]? | select(.type == "A") | .address] | unique | .[]' <<< "$result") || result=''
     else
       result=''
     fi
-    if [ -z "$result" ]; then
-      result=$(jq -r --arg domain "$domain" '.[$domain][]?' <<< "$cache") || return 1
-      if [ -n "$result" ]; then
-        log_warn "Resolution failed for '$domain' - retaining last known addresses"
-      else
-        log_error "Resolution failed for '$domain' without cached addresses - keeping existing ACL"
-        failed=true
-        continue
-      fi
-    fi
     while IFS= read -r address; do
+      [ -n "$address" ] || continue
       if /bin/ipcalc -4cs "$address"; then
         addresses+=("$address")
-        clients+=("$address")
-        log_info "Allowing '$domain' => '$address'"
       else
-        log_error "Invalid IPv4 address returned for '$domain'"
-        failed=true
+        log_error "Ignoring invalid IPv4 address returned for '$entry'"
       fi
     done <<< "$result"
-    result=$(printf '%s\n' "${addresses[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))') || return 1
-    next_cache=$(jq -c --arg domain "$domain" --argjson addresses "$result" '.[$domain] = $addresses' <<< "$next_cache") || return 1
+
+    if [ "${#addresses[@]}" -gt 0 ]; then
+      entry_cache=$(printf '%s\n' "${addresses[@]}" | jq -Rsc --argjson updated "$now" '{addresses: (split("\n") | map(select(length > 0))), updated: $updated}') || return 1
+    else
+      entry_cache=$(jq -c --arg domain "$entry" --argjson now "$now" --argjson max_age "$max_age" \
+        '.[$domain] | select(type == "object" and (.addresses | type) == "array" and (.updated | type) == "number" and $now - .updated <= $max_age)' <<< "$cache") || return 1
+      if [ -z "$entry_cache" ]; then
+        log_error "Resolution failed for '$entry' without recent cached addresses - client not allowed"
+        continue
+      fi
+      mapfile -t addresses < <(jq -r '.addresses[]' <<< "$entry_cache")
+      log_warn "Resolution failed for '$entry' - retaining addresses from the last successful lookup"
+    fi
+    for address in "${addresses[@]}"; do
+      clients+=("$address")
+      log_info "Allowing '$entry' => '$address'"
+    done
+    next_cache=$(jq -c --arg domain "$entry" --argjson value "$entry_cache" '.[$domain] = $value' <<< "$next_cache") || return 1
   done
 
-  [ "$failed" = false ] || return 1
   dns_tmp=$(mktemp /etc/dnsdist/allowedClients.acl.XXXXXX) || return 1
   nginx_tmp=$(mktemp /etc/nginx/allowedClients.conf.XXXXXX) || { rm -f "$dns_tmp"; return 1; }
   cache_tmp=$(mktemp /etc/snidust/ddns-cache.json.XXXXXX) || { rm -f "$dns_tmp" "$nginx_tmp"; return 1; }

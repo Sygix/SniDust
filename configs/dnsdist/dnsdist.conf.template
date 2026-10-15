@@ -83,6 +83,10 @@ echo "-- query reload.acl.snidust.local to reload Blocklist"
 echo "addAction(AndRule({QNameRule(\"reload.acl.snidust.local\"),QTypeRule(\"A\")}),LuaAction(ReloadACL))"
 echo ""
 
+echo "-- query apply.acl.snidust.local to load the generated ACL file"
+echo "addAction(AndRule({QNameRule(\"apply.acl.snidust.local\"),QTypeRule(\"A\")}),LuaAction(ApplyACL))"
+echo ""
+
 echo "-- query reload.certs.snidust.local to reload certificates used for DoT"
 echo "addAction(AndRule({QNameRule(\"reload.certs.snidust.local\"),QTypeRule(\"A\")}),LuaAction(ReloadCerts))"
 echo ""

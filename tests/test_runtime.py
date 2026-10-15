@@ -84,14 +84,14 @@ class RuntimeTests(unittest.TestCase):
             docker("rm", "-f", name)
 
     @classmethod
-    def start(cls, spoof_all, from_file=False, enable_dot=False):
+    def start(cls, spoof_all, from_file=False, enable_dot=False, clients="0.0.0.0/0"):
         name = "snidust-test-" + secrets.token_hex(5)
         args = ["run", "-d", "--name", name,
                "-p", "127.0.0.1::53/udp", "-p", "127.0.0.1::53/tcp",
                "-p", "127.0.0.1::443/tcp", "-p", "127.0.0.1::80/tcp",
                "--cap-add", "NET_BIND_SERVICE",
-               "-e", "ALLOWED_CLIENTS=0.0.0.0/0", "-e", "EXTERNAL_IP=192.0.2.10",
-               "-e", "SPOOF_ALL_DOMAINS=" + spoof_all]
+               "-e", "ALLOWED_CLIENTS=" + clients, "-e", "EXTERNAL_IP=192.0.2.10",
+               "-e", "DNSDIST_DEBUG=true", "-e", "SPOOF_ALL_DOMAINS=" + spoof_all]
         if from_file:
             args += ["-e", "ALLOWED_CLIENTS_FILE=/etc/snidust/test-clients"]
         if enable_dot:
@@ -101,6 +101,10 @@ class RuntimeTests(unittest.TestCase):
             args += ["bash", "-c", "if [ ! -f /etc/snidust/test-initialized ]; then printf '0.0.0.0/0\\n' > /etc/snidust/test-clients; touch /etc/snidust/test-initialized; fi; exec bash /entrypoint.sh"]
         docker(*args)
         cls.containers.append(name)
+        return cls.wait_ready(name)
+
+    @classmethod
+    def wait_ready(cls, name):
         udp_port = int(docker("port", name, "53/udp").rsplit(":", 1)[1])
         tcp_port = int(docker("port", name, "53/tcp").rsplit(":", 1)[1])
         deadline = time.monotonic() + 30
@@ -143,10 +147,46 @@ class RuntimeTests(unittest.TestCase):
 
     def test_dns_over_tls_on_documented_port(self):
         name, _, _ = self.start("true", enable_dot=True)
-        port = int(docker("port", name, "853/tcp").rsplit(":", 1)[1])
-        context = ssl.create_default_context(cadata=docker("exec", name, "cat", "/etc/dnsdist/certs/tls.pem"))
-        self.assertEqual(query(port, "netflix.com", 1, tcp=True, tls_context=context),
-                         (0, [(1, socket.inet_aton("192.0.2.10"))]))
+        for restarted in (False, True):
+            with self.subTest(restarted=restarted):
+                if restarted:
+                    docker("restart", name)
+                    self.wait_ready(name)
+                port = int(docker("port", name, "853/tcp").rsplit(":", 1)[1])
+                context = ssl.create_default_context(cadata=docker("exec", name, "cat", "/etc/dnsdist/certs/tls.pem"))
+                self.assertEqual(query(port, "netflix.com", 1, tcp=True, tls_context=context),
+                                 (0, [(1, socket.inet_aton("192.0.2.10"))]))
+
+    def test_listed_mode_forwards_unlisted_domains(self):
+        port = self.listed_domains[1]
+        for qtype in (1, 28):
+            with self.subTest(qtype=qtype):
+                rcode, answers = query(port, "example.org", qtype)
+                self.assertEqual(rcode, 0)
+                self.assertIn(qtype, [record_type for record_type, _ in answers])
+                self.assertNotIn((1, socket.inet_aton("192.0.2.10")), answers)
+
+    def test_clients_file_ignores_comments_and_whitespace(self):
+        name = self.start("true")[0]
+        docker("exec", name, "sh", "-c", "printf '# clients\\r\\n10.0.0.1\\r\\n10.0.0.2 \\n\\n10.0.0.3 # inline\\n' > /tmp/clients")
+        docker("exec", name, "env", "ALLOWED_CLIENTS_FILE=/tmp/clients", "bash", "/generateACL.sh")
+        self.assertEqual(set(docker("exec", name, "cat", "/etc/dnsdist/allowedClients.acl").splitlines()),
+                         {"127.0.0.1", "10.0.0.1", "10.0.0.2", "10.0.0.3"})
+
+    def test_unresolvable_client_does_not_block_startup(self):
+        name, port, _ = self.start("true", clients="0.0.0.0/0, unresolvable.invalid")
+        self.assertEqual(docker("exec", name, "cat", "/etc/dnsdist/allowedClients.acl").splitlines(),
+                         ["0.0.0.0/0", "127.0.0.1"])
+        self.assertEqual(query(port, "netflix.com", 1), (0, [(1, socket.inet_aton("192.0.2.10"))]))
+
+    def test_cron_refresh_applies_acl(self):
+        name, port, _ = self.start("true")
+        docker("exec", name, "env", "ALLOWED_CLIENTS=0.0.0.0/0,10.0.0.9", "bash", "/dynDNSCron.sh")
+        self.assertIn("allow 10.0.0.9;", docker("exec", name, "cat", "/etc/nginx/allowedClients.conf"))
+        self.assertEqual(query(port, "netflix.com", 1), (0, [(1, socket.inet_aton("192.0.2.10"))]))
+        docker("exec", name, "env", "ALLOWED_CLIENTS=127.0.0.1", "bash", "/dynDNSCron.sh")
+        with self.assertRaises(socket.timeout):
+            query(port, "netflix.com", 1)
 
     def test_netflix_https_through_proxy_and_logs(self):
         name = self.all_domains[0]
@@ -185,10 +225,13 @@ class RuntimeTests(unittest.TestCase):
         original = docker("exec", name, "cat", "/etc/dnsdist/allowedClients.acl")
         self.assertEqual(set(original.splitlines()), {"127.0.0.1", "192.0.2.20", "192.0.2.21"})
         docker("exec", name, "touch", "/etc/snidust/ddns-fail")
-        docker("exec", name, "env", "ALLOWED_CLIENTS=client.invalid", "bash", "/generateACL.sh")
+        docker("exec", name, "env", "ALLOWED_CLIENTS=client.invalid,unknown.invalid", "bash", "/generateACL.sh")
         self.assertEqual(docker("exec", name, "cat", "/etc/dnsdist/allowedClients.acl"), original)
-        with self.assertRaises(subprocess.CalledProcessError):
-            docker("exec", name, "env", "ALLOWED_CLIENTS=unknown.invalid", "bash", "/generateACL.sh")
+        docker("exec", name, "sh", "-c", "jq -c '.[\"client.invalid\"].updated = 0' /etc/snidust/ddns-cache.json > /tmp/cache && cat /tmp/cache > /etc/snidust/ddns-cache.json")
+        docker("exec", name, "env", "ALLOWED_CLIENTS=client.invalid", "bash", "/generateACL.sh")
+        self.assertEqual(docker("exec", name, "cat", "/etc/dnsdist/allowedClients.acl"), "127.0.0.1")
+        docker("exec", name, "rm", "/etc/snidust/ddns-fail")
+        docker("exec", name, "env", "ALLOWED_CLIENTS=client.invalid", "bash", "/generateACL.sh")
         self.assertEqual(docker("exec", name, "cat", "/etc/dnsdist/allowedClients.acl"), original)
         docker("exec", name, "env", "ALLOWED_CLIENTS=", "bash", "/generateACL.sh")
         self.assertEqual(docker("exec", name, "cat", "/etc/dnsdist/allowedClients.acl"), "127.0.0.1")
@@ -204,8 +247,7 @@ class RuntimeTests(unittest.TestCase):
     def test_failed_reload_preserves_active_acl(self):
         name, port, _ = self.start("true", from_file=True)
         original = docker("exec", name, "cat", "/etc/nginx/allowedClients.conf")
-        docker("exec", "-u", "0", name, "sh", "-c", 'printf "#!/bin/sh\\nexit 1\\n" > /usr/bin/dog')
-        docker("exec", name, "sh", "-c", "printf 'unknown.invalid\\n' > /etc/snidust/test-clients")
+        docker("exec", name, "rm", "/etc/snidust/test-clients")
         self.assertEqual(query(port, "reload.acl.snidust.local", 1), (2, []))
         self.assertEqual(query(port, "netflix.com", 1), (0, [(1, socket.inet_aton("192.0.2.10"))]))
         self.assertEqual(docker("exec", name, "cat", "/etc/nginx/allowedClients.conf"), original)
