@@ -28,7 +28,20 @@ env:
 
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build test image
+        run: docker build -t snidust:diagnostic .
+      - name: Run container integration tests
+        run: python3 tests/test_runtime.py
+
   build:
+    needs: test
 
     runs-on: ubuntu-latest
     permissions:
